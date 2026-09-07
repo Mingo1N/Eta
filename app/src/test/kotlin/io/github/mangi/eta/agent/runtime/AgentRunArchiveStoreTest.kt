@@ -82,6 +82,16 @@ class AgentRunArchiveStoreTest {
                         content = "系统状态正常",
                     )
                 ),
+                historyReplacement = listOf(
+                    AgentModelClient.ConversationMessage(
+                        role = "system",
+                        content = "<eta_context_summary>归档压缩历史</eta_context_summary>",
+                    ),
+                    AgentModelClient.ConversationMessage(
+                        role = "user",
+                        content = "归档最新问题",
+                    ),
+                ),
             ),
             createdAt = createdAt,
             userImagePreviews = listOf(

@@ -25,17 +25,23 @@ internal object AgentPendingResultRecovery {
         supplements: List<AgentUiHandoffPayload.Supplement>,
     ): Outcome {
         val content = result.content.takeIf { result.ok && it.isNotBlank() }
-        val history = AgentRuntimeHistoryReducer.apply(
-            state = state,
-            runId = runId,
-            additions = listOfNotNull(
+        val additions = if (result.historyReplacement == null) {
+            listOfNotNull(
                 promptSupplement?.let { supplement ->
                     AgentModelClient.buildUserHistoryMessage(
                         text = supplement.text,
                         images = emptyList(),
                     )
                 }
-            ) + result.transcript,
+            ) + result.transcript
+        } else {
+            result.transcript
+        }
+        val history = AgentRuntimeHistoryReducer.apply(
+            state = state,
+            runId = runId,
+            additions = additions,
+            historyReplacement = result.historyReplacement,
         )
         if (history.alreadyApplied) return Outcome(state, alreadyApplied = true)
 

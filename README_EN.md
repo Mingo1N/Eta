@@ -52,6 +52,7 @@ A task can combine these tools: read web sources and then organize files with a 
 
 - **Personal context:** retrieve notifications, app usage, and location on demand. Dedicated searches for photos, calendar events, SMS messages, recordings, health summaries, and chat images require root; some sources also depend on the ROM and installed apps.
 - **Long-term memory:** store context for future conversations in a local `MEMORY.md`. Core memory is included within a context budget, with the rest retrieved as needed. You can edit, clear, or disable it.
+- **Context compaction:** as the conversation nears the model's input limit, older whole turns are trimmed into a background summary that chat, the system assistant and continuations all share. Summary requests carry no tools and cannot run anything.
 - **Skills:** load task instructions, reference material, and script resources as needed. Install from public GitHub repositories or import a local ZIP. Installation does not run scripts or grant additional permissions.
 - **MCP:** connect remote tools over Streamable HTTP, with optional bearer-token authentication. Enable tools individually to use them alongside local tools.
 

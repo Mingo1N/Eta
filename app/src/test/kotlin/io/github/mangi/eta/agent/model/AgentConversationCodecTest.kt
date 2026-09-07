@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -106,6 +107,45 @@ class AgentConversationCodecTest {
         assertTrue(encoded.length <= AgentConversationCodec.MAX_CONVERSATION_CHECKPOINT_CHARS)
         assertTrue(decoded.first().content.contains("容量上限已压缩"))
         assertEquals("继续处理最新任务", decoded.last().content)
+    }
+
+    @Test
+    fun replacementDecodingSeparatesCorruptionFromLegitimateEmptyHistory() {
+        assertNull(AgentConversationCodec.decodeTranscriptOrKeep(null))
+        assertNull(AgentConversationCodec.decodeTranscriptOrKeep("   "))
+        assertNull(AgentConversationCodec.decodeTranscriptOrKeep("""{"role":"user"}"""))
+        assertNull(AgentConversationCodec.decodeTranscriptOrKeep("[{\"role\":\"user\",\"content\":"))
+        assertEquals(
+            emptyList<AgentModelClient.ConversationMessage>(),
+            AgentConversationCodec.decodeTranscriptOrKeep("[]"),
+        )
+        assertEquals(
+            "保留",
+            AgentConversationCodec.decodeTranscriptOrKeep(
+                AgentConversationCodec.encodeConversationCheckpoint(
+                    listOf(AgentModelClient.ConversationMessage(role = "user", content = "保留")),
+                )
+            )?.single()?.content,
+        )
+        // transcript 的既有语义不变：损坏仍然退化成空列表。
+        assertEquals(
+            emptyList<AgentModelClient.ConversationMessage>(),
+            AgentConversationCodec.decodeTranscript("""[{"role"""),
+        )
+    }
+
+    @Test
+    fun drainCheckpointUsesTighterBudgetAndKeepsNewestTurn() {
+        val messages = List(20) { index ->
+            AgentModelClient.ConversationMessage(role = "user", content = "轮次-$index-${"u".repeat(20_000)}")
+        }
+
+        val encoded = AgentConversationCodec.encodeConversationCheckpointForDrain(messages)
+        val decoded = AgentConversationCodec.decodeTranscriptOrKeep(encoded)
+
+        assertTrue(encoded.length <= AgentConversationCodec.MAX_DRAIN_CHECKPOINT_CHARS)
+        assertTrue(decoded!!.first().content.contains("容量上限已压缩"))
+        assertTrue(decoded.last().content.startsWith("轮次-19-"))
     }
 
     @Test

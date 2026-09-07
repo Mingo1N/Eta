@@ -91,6 +91,9 @@ internal object AgentRunArchiveStore {
             error = result.error,
             reasoningContent = result.reasoningContent,
             transcriptJson = AgentConversationCodec.encodeTranscriptForStorage(result.transcript),
+            historyReplacementJson = result.historyReplacement?.let {
+                AgentConversationCodec.encodeConversationCheckpoint(it)
+            },
             userImagePreviewsJson = JSONArray(userImagePreviews).toString(),
             createdAt = createdAt,
         )
@@ -129,6 +132,9 @@ internal object AgentRunArchiveStore {
                             )
                         )
                     },
+                    historyReplacement = run.historyReplacementJson?.let(
+                        AgentConversationCodec::decodeTranscriptOrKeep
+                    ),
                 ),
                 createdAt = run.createdAt,
                 userImagePreviews = JSONArray(run.userImagePreviewsJson).let { previews ->

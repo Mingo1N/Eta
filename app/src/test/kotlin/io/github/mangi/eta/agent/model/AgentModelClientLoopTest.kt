@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -618,6 +619,167 @@ class AgentModelClientLoopTest {
         assertEquals(listOf(1, 2, 3), events.filterIsInstance<AgentEvent.RoundStarted>().map { it.round })
         assertEquals(2, events.filterIsInstance<AgentEvent.ModelRetryScheduled>().single().round)
         assertEquals(1, events.filterIsInstance<AgentEvent.ToolStarted>().size)
+    }
+
+    @Test
+    fun oversizedHistoryCompactsThroughToollessSummaryBeforeFirstMainRequest() {
+        val scripted = ScriptedProvider(
+            assistant(content = "模型摘要：此前已完成三轮观察。", finishReason = "stop"),
+            assistant(content = "完成", finishReason = "stop"),
+        )
+        val shapes = mutableListOf<Pair<Int, Int>>()
+        val provider = object : AgentProviderClient by scripted {
+            override fun complete(
+                request: ProviderRequest,
+                runController: AgentRunController,
+                onEvent: (ProviderEvent) -> Unit,
+            ): ProviderResponse {
+                shapes += request.messages.length() to request.tools.length()
+                return scripted.complete(request, runController, onEvent)
+            }
+        }
+        var executions = 0
+
+        val result = AgentModelClient.complete(
+            config = modelConfig().copy(contextWindow = 30_000),
+            prompt = "当前问题",
+            history = List(6) { round ->
+                listOf(
+                    AgentModelClient.ConversationMessage(
+                        role = "user",
+                        content = "old-$round-" + "o".repeat(20_000),
+                    ),
+                    AgentModelClient.ConversationMessage(
+                        role = "assistant",
+                        content = "answer-$round-" + "a".repeat(20_000),
+                    ),
+                )
+            }.flatten(),
+            toolExecutor = AgentModelClient.ToolExecutor {
+                executions += 1
+                AgentModelClient.ToolResult("{\"ok\":true}")
+            },
+            provider = provider,
+        )
+
+        assertEquals(2, shapes.size)
+        // 摘要请求只带系统与不可信转写两条消息，且不能声明主工具，避免摘要顺带执行动作。
+        assertEquals(2, shapes[0].first)
+        assertEquals(0, shapes[0].second)
+        assertTrue(shapes[1].second > shapes[0].second)
+        assertEquals(0, executions)
+        assertTrue(scripted.requests[0].toString().contains("eta_untrusted_transcript"))
+        assertFalse(scripted.requests[1].toString().contains("old-0-"))
+        assertEquals("完成", result.content)
+        assertEquals(listOf("assistant"), result.transcript.map { it.role })
+        val replacement = requireNotNull(result.historyReplacement)
+        assertEquals("当前问题", replacement.last().content)
+        assertTrue(replacement.size < 7)
+        assertFalse(replacement.any { it.content.contains("old-0-") })
+    }
+
+    @Test
+    fun summaryProviderFailureStillCompactsAndReportsReplacementWithoutToolCalls() {
+        val scripted = ScriptedProvider(assistant(content = "完成", finishReason = "stop"))
+        val provider = object : AgentProviderClient by scripted {
+            override fun complete(
+                request: ProviderRequest,
+                runController: AgentRunController,
+                onEvent: (ProviderEvent) -> Unit,
+            ): ProviderResponse {
+                if (request.tools.length() == 0) throw IllegalStateException("summary provider down")
+                return scripted.complete(request, runController, onEvent)
+            }
+        }
+
+        val result = AgentModelClient.complete(
+            config = modelConfig().copy(contextWindow = 30_000),
+            prompt = "当前问题",
+            history = List(6) { round ->
+                AgentModelClient.ConversationMessage(
+                    role = "user",
+                    content = "old-$round-" + "o".repeat(20_000),
+                )
+            },
+            toolExecutor = AgentModelClient.ToolExecutor { error("不应调用工具") },
+            provider = provider,
+        )
+
+        assertEquals(1, scripted.requests.size)
+        assertEquals("完成", result.content)
+        val replacement = requireNotNull(result.historyReplacement)
+        assertTrue(replacement.last().content == "当前问题")
+    }
+
+    @Test
+    fun shortHistorySkipsCompactionAndLeavesReplacementUnset() {
+        val provider = ScriptedProvider(assistant(content = "完成", finishReason = "stop"))
+
+        val result = AgentModelClient.complete(
+            config = modelConfig().copy(contextWindow = 30_000),
+            prompt = "当前问题",
+            history = listOf(AgentModelClient.ConversationMessage(role = "user", content = "旧问题")),
+            toolExecutor = AgentModelClient.ToolExecutor { error("不应调用工具") },
+            provider = provider,
+        )
+
+        assertNull(result.historyReplacement)
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun longToolChainDegradesEarlyToolResultsAndKeepsNewestTurns() {
+        val toolRounds = 6
+        val responses = List<(ProviderRequest, AgentRunController) -> JSONObject>(toolRounds) { index ->
+            { _, _ ->
+                assistant(
+                    finishReason = "tool_calls",
+                    toolCalls = listOf(toolCall("call-$index", "get_current_context", "{}")),
+                )
+            }
+        } + listOf<(ProviderRequest, AgentRunController) -> JSONObject>(
+            { _, _ -> assistant(content = "完成", finishReason = "stop") }
+        )
+        val provider = ScriptedProvider(responses)
+        var executions = 0
+
+        val result = AgentModelClient.complete(
+            config = modelConfig().copy(contextWindow = 30_000),
+            prompt = "开始",
+            toolExecutor = AgentModelClient.ToolExecutor {
+                executions += 1
+                AgentModelClient.ToolResult("res-${it.id}-" + "y".repeat(20_000))
+            },
+            provider = provider,
+        )
+
+        assertEquals("完成", result.content)
+        assertEquals(toolRounds, executions)
+
+        val lastRequest = provider.requests.last().toString()
+        assertTrue(lastRequest.contains("重新调用该工具"))
+        assertFalse(lastRequest.contains("res-call-0-" + "y".repeat(20_000)))
+        // 最近的回合必须完整保留，否则模型下一步要用的观察结果就没了。
+        assertTrue(lastRequest.contains("res-call-5-" + "y".repeat(20_000)))
+        // 降级只截正文：每个 tool 调用仍有配对的 tool 消息。
+        val lastMessages = provider.requests.last()
+        assertEquals(
+            toolRounds,
+            (0 until lastMessages.length()).count { index ->
+                lastMessages.getJSONObject(index).optString("role") == "tool"
+            },
+        )
+        assertEquals(
+            toolRounds,
+            (0 until lastMessages.length()).count { index ->
+                lastMessages.getJSONObject(index).optJSONArray("tool_calls") != null
+            },
+        )
+        assertEquals(
+            listOf("assistant", "tool").repeat(toolRounds) + listOf("assistant"),
+            result.transcript.map { it.role },
+        )
+        assertTrue(result.transcript.any { it.role == "tool" && it.content.contains("重新调用该工具") })
     }
 
     private class ScriptedProvider(

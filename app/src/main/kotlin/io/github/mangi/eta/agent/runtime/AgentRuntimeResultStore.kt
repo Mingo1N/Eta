@@ -102,6 +102,9 @@ internal object AgentRuntimeResultStore {
             error = result.error,
             reasoningContent = result.reasoningContent,
             transcriptJson = AgentConversationCodec.encodeTranscriptForStorage(result.transcript),
+            historyReplacementJson = result.historyReplacement?.let {
+                AgentConversationCodec.encodeConversationCheckpoint(it)
+            },
             createdAt = createdAt,
         )
     }
@@ -125,6 +128,9 @@ internal object AgentRuntimeResultStore {
                     ok = ok,
                     content = content,
                     reasoningContent = reasoningContent,
+                ),
+                historyReplacement = historyReplacementJson?.let(
+                    AgentConversationCodec::decodeTranscriptOrKeep
                 ),
             ),
             createdAt = createdAt,

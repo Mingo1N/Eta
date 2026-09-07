@@ -99,6 +99,16 @@ class AgentRuntimeResultStoreTest {
                 ok = true,
                 content = "完成",
                 transcript = transcript,
+                historyReplacement = listOf(
+                    AgentModelClient.ConversationMessage(
+                        role = "system",
+                        content = "<eta_context_summary>压缩历史</eta_context_summary>",
+                    ),
+                    AgentModelClient.ConversationMessage(
+                        role = "user",
+                        content = "最新问题",
+                    ),
+                ),
             ),
             createdAt = System.currentTimeMillis(),
         )
@@ -109,6 +119,11 @@ class AgentRuntimeResultStoreTest {
         assertEquals(transcript.map { it.role }, restored.result.transcript.map { it.role })
         assertEquals("call-1", restored.result.transcript[1].toolCallId)
         assertEquals("完成", restored.result.transcript.last().content)
+        assertEquals(
+            listOf("system", "user"),
+            restored.result.historyReplacement?.map { it.role },
+        )
+        assertEquals("最新问题", restored.result.historyReplacement?.last()?.content)
     }
 
     @Test

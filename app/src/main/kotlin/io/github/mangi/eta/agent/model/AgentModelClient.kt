@@ -97,16 +97,13 @@ internal object AgentModelClient {
     ): ModelResponse.Text {
         config.validate()
         val initialCapabilities = capabilitiesProvider()
-        val messages = AgentPromptBuilder.buildInitialMessages(
+        val systemMessages = AgentPromptBuilder.buildSystemMessages(
             config,
-            prompt,
-            images,
-            history,
             skillContext,
             memoryContext,
-            rootAvailable = initialCapabilities.rootAvailable,
+            initialCapabilities.rootAvailable,
         )
-        val transcriptStartIndex = messages.length()
+        val currentUserMessage = AgentConversationCodec.userMessage(prompt, images)
         fun toolsFor(capabilities: AgentToolCapabilities): JSONArray {
             val tools = AgentToolCatalog.build(
                 terminalTools = config.terminalTools,
@@ -125,6 +122,32 @@ internal object AgentModelClient {
             return tools
         }
         val tools = toolsFor(initialCapabilities)
+        val compaction = AgentContextCompactor.compactIfNeeded(
+            config = config,
+            history = history,
+            systemMessages = systemMessages,
+            currentUserMessage = currentUserMessage,
+            tools = tools,
+            provider = provider,
+            controller = runController,
+        )
+        val messages = JSONArray().also { target ->
+            for (index in 0 until systemMessages.length()) {
+                target.put(systemMessages.getJSONObject(index))
+            }
+            compaction.history.forEach { item ->
+                runCatching { AgentConversationCodec.toJsonObject(item) }
+                    .getOrNull()
+                    ?.let(target::put)
+            }
+            target.put(currentUserMessage)
+        }
+        val transcriptStartIndex = messages.length()
+        val historyReplacement = compaction.history
+            .takeIf { compaction.compacted }
+            ?.let { compactedHistory ->
+                compactedHistory + AgentConversationCodec.durableMessage(currentUserMessage)
+            }
         onEvent(
             AgentEvent.RunStarted(
                 initialImages = images.size,
@@ -146,11 +169,11 @@ internal object AgentModelClient {
             toolsForRound = {
                 val capabilities = capabilitiesProvider()
                 if (capabilities.rootAvailable != promptRootAvailable) {
-                    val systemMessages = AgentPromptBuilder.buildSystemMessages(
+                    val updatedSystemMessages = AgentPromptBuilder.buildSystemMessages(
                         config, skillContext, memoryContext, capabilities.rootAvailable,
                     )
-                    for (index in 0 until systemMessages.length()) {
-                        messages.put(index, systemMessages.getJSONObject(index))
+                    for (index in 0 until updatedSystemMessages.length()) {
+                        messages.put(index, updatedSystemMessages.getJSONObject(index))
                     }
                     promptRootAvailable = capabilities.rootAvailable
                 }
@@ -170,6 +193,7 @@ internal object AgentModelClient {
                     transcriptStartIndex,
                     loop.sensitiveToolCallIdsSnapshot(),
                 ),
+                historyReplacement = historyReplacement,
             )
         }
         return ModelResponse.Text(
@@ -180,6 +204,7 @@ internal object AgentModelClient {
                 transcriptStartIndex,
                 result.sensitiveToolCallIds,
             ),
+            historyReplacement = historyReplacement,
         )
     }
 
@@ -290,6 +315,7 @@ internal object AgentModelClient {
             val content: String,
             val reasoningContent: String = "",
             val transcript: List<ConversationMessage> = emptyList(),
+            val historyReplacement: List<ConversationMessage>? = null,
         ) : ModelResponse
     }
 
@@ -299,4 +325,5 @@ internal class AgentModelExecutionException(
     cause: Throwable,
     val reasoningContent: String,
     val transcript: List<AgentModelClient.ConversationMessage>,
+    val historyReplacement: List<AgentModelClient.ConversationMessage>? = null,
 ) : RuntimeException(cause.message ?: cause.javaClass.simpleName, cause)

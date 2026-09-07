@@ -1,9 +1,11 @@
 package io.github.mangi.eta.agent.runtime
 
 import android.graphics.Bitmap
+import android.os.Bundle
 import android.os.Parcel
 import android.util.Base64
 import io.github.mangi.eta.agent.media.AgentImageCodec
+import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.data.model.ModelReasoningCapabilities
 import io.github.mangi.eta.data.model.ReasoningEffort
@@ -183,6 +185,12 @@ class AgentRuntimeWireTest {
                             content = "t".repeat(80_000),
                         )
                     ),
+                    historyReplacement = List(10) { round ->
+                        AgentModelClient.ConversationMessage(
+                            role = "user",
+                            content = "h$round-" + "x".repeat(80_000),
+                        )
+                    },
                 ),
                 createdAt = index.toLong(),
             )
@@ -194,6 +202,41 @@ class AgentRuntimeWireTest {
         } finally {
             parcel.recycle()
         }
+    }
+
+    @Test
+    fun drainedResultBoundsHistoryReplacementForBinder() {
+        val completed = AgentRuntimeWire.CompletedRun(
+            handoff = AgentRuntimeWire.EntryHandoff(
+                id = "run-drain",
+                source = "agent_ui",
+                payload = "conversation",
+            ),
+            result = AgentRuntimeWire.RunResult(
+                runId = "run-drain",
+                ok = true,
+                content = "完成",
+                historyReplacement = List(10) { round ->
+                    AgentModelClient.ConversationMessage(
+                        role = "user",
+                        content = "h$round-" + "x".repeat(80_000),
+                    )
+                },
+            ),
+            createdAt = 0L,
+        )
+
+        val drained = AgentRuntimeWire.completedRunsToBundle(listOf(completed))
+        val resultBundle = drained.getParcelableArrayList("results", Bundle::class.java)
+            ?.single()
+            ?.getBundle("result")
+            ?: error("drain response missing result bundle")
+        val encoded = resultBundle.getString("history_replacement_json")
+
+        assertTrue(encoded.length <= AgentConversationCodec.MAX_DRAIN_CHECKPOINT_CHARS)
+        val restored = AgentRuntimeWire.completedRunsFromBundle(drained).single().result
+        assertTrue(restored.historyReplacement?.last()?.content?.startsWith("h9-") == true)
+        assertTrue(restored.historyReplacement?.first()?.content?.contains("容量上限已压缩") == true)
     }
 
     @Test
@@ -468,11 +511,45 @@ class AgentRuntimeWireTest {
                     reasoningContent = "先分析问题，再调用工具，最后总结。",
                 )
             ),
+            historyReplacement = listOf(
+                AgentModelClient.ConversationMessage(
+                    role = "system",
+                    content = "<eta_context_summary>压缩后的历史</eta_context_summary>",
+                ),
+                AgentModelClient.ConversationMessage(
+                    role = "user",
+                    content = "保留的最新问题",
+                ),
+            ),
         )
 
         val roundTripped = AgentRuntimeWire.runResultFromBundle(AgentRuntimeWire.toBundle(result))
 
         assertEquals(result, roundTripped)
+    }
+
+    @Test
+    fun emptyHistoryReplacementSurvivesWhileMissingReplacementRemainsNull() {
+        val empty = AgentRuntimeWire.RunResult(
+            runId = "run-empty-replacement",
+            ok = false,
+            content = "",
+            historyReplacement = emptyList(),
+        )
+        val emptyRoundTripped = AgentRuntimeWire.runResultFromBundle(
+            AgentRuntimeWire.toBundle(empty)
+        )
+        assertEquals(emptyList<AgentModelClient.ConversationMessage>(), emptyRoundTripped.historyReplacement)
+
+        val legacy = AgentRuntimeWire.RunResult(
+            runId = "run-legacy-replacement",
+            ok = false,
+            content = "",
+        )
+        val legacyRoundTripped = AgentRuntimeWire.runResultFromBundle(
+            AgentRuntimeWire.toBundle(legacy)
+        )
+        assertNull(legacyRoundTripped.historyReplacement)
     }
 
     @Test

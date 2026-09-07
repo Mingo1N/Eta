@@ -417,9 +417,10 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                 activeRunId = null
                 runJob = null
                 if (result.ok) {
-                    conversationHistory = conversationHistory +
-                        AgentModelClient.buildUserHistoryMessage(normalized, runImages) +
-                        result.transcript
+                    val currentUser = AgentModelClient.buildUserHistoryMessage(normalized, runImages)
+                    conversationHistory = result.historyReplacement
+                        ?.let { replacement -> replacement + result.transcript }
+                        ?: (conversationHistory + currentUser + result.transcript)
                     uiState = uiState.copy(
                         phase = EtaVoicePhase.READY,
                         status = EtaVoiceStatus.Completed,

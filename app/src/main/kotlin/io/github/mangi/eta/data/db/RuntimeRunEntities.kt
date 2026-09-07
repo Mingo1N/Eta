@@ -21,6 +21,7 @@ internal data class RuntimeResultEntity(
     @ColumnInfo(name = "reasoning_content") val reasoningContent: String,
     @ColumnInfo(name = "transcript_json") val transcriptJson: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "history_replacement_json") val historyReplacementJson: String? = null,
 )
 
 @Entity(tableName = "runtime_archive_runs")
@@ -38,6 +39,7 @@ internal data class RuntimeArchiveRunEntity(
     @ColumnInfo(name = "transcript_json") val transcriptJson: String,
     @ColumnInfo(name = "user_image_previews_json") val userImagePreviewsJson: String,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "history_replacement_json") val historyReplacementJson: String? = null,
 )
 
 @Entity(

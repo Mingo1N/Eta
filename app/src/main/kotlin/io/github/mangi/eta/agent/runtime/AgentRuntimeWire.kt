@@ -122,6 +122,7 @@ internal object AgentRuntimeWire {
     private const val KEY_ERROR = "error"
     private const val KEY_RESULT = "result"
     private const val KEY_TRANSCRIPT_JSON = "transcript_json"
+    private const val KEY_HISTORY_REPLACEMENT = "history_replacement_json"
     private const val KEY_HANDOFF = "handoff"
     private const val KEY_HANDOFF_ID = "handoff_id"
     private const val KEY_HANDOFF_SOURCE = "handoff_source"
@@ -180,6 +181,7 @@ internal object AgentRuntimeWire {
         val error: String? = null,
         val reasoningContent: String = "",
         val transcript: List<AgentModelClient.ConversationMessage> = emptyList(),
+        val historyReplacement: List<AgentModelClient.ConversationMessage>? = null,
     )
 
     data class EntryHandoff(
@@ -463,6 +465,16 @@ internal object AgentRuntimeWire {
                 AgentConversationCodec.encodeTranscriptForIpc(transcript)
             },
         )
+        historyReplacement?.let { replacement ->
+            putString(
+                KEY_HISTORY_REPLACEMENT,
+                if (compactForDrain) {
+                    AgentConversationCodec.encodeConversationCheckpointForDrain(replacement)
+                } else {
+                    AgentConversationCodec.encodeConversationCheckpoint(replacement)
+                },
+            )
+        }
     }
 
     fun runResultFromBundle(bundle: Bundle): RunResult =
@@ -473,6 +485,11 @@ internal object AgentRuntimeWire {
             error = bundle.getString(KEY_ERROR),
             reasoningContent = bundle.getString(KEY_REASONING_CONTENT).orEmpty(),
             transcript = AgentConversationCodec.decodeTranscript(bundle.getString(KEY_TRANSCRIPT_JSON)),
+            historyReplacement = if (bundle.containsKey(KEY_HISTORY_REPLACEMENT)) {
+                AgentConversationCodec.decodeTranscriptOrKeep(bundle.getString(KEY_HISTORY_REPLACEMENT))
+            } else {
+                null
+            },
         )
 
     fun toBundle(completedRun: CompletedRun): Bundle = completedRun.toBundle(compactForDrain = false)

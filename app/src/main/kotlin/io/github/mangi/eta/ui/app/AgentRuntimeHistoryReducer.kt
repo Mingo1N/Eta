@@ -14,13 +14,15 @@ internal object AgentRuntimeHistoryReducer {
         state: AgentChatHomeUiState,
         runId: String,
         additions: List<AgentModelClient.ConversationMessage>,
+        historyReplacement: List<AgentModelClient.ConversationMessage>? = null,
     ): Outcome {
         if (runId in state.appliedRuntimeRunIds) {
             return Outcome(state, alreadyApplied = true)
         }
+        val baseHistory = historyReplacement ?: state.history
         return Outcome(
             state = state.copy(
-                history = state.history + additions,
+                history = baseHistory + additions,
                 appliedRuntimeRunIds = (state.appliedRuntimeRunIds + runId)
                     .takeLast(MAX_APPLIED_RUN_IDS),
             ),

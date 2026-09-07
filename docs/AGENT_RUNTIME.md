@@ -134,11 +134,21 @@ App 在发起请求前已经把当前用户消息写入会话 history，因此 R
 → 新补充消息
 ```
 
+若该 run 触发了上下文压缩，`historyReplacement` 已经包含压缩摘要、保留回合与原始用户消息，续跑改用：
+
+```text
+historyReplacement
+→ 完整增量 transcript
+→ 新补充消息
+```
+
 图片只在需要它的当前模型回合中传递；持久 transcript 会删除 data URL，并写入稳定的省略说明，避免截图 base64 同时膨胀 Binder、Room 和后续上下文。外部入口归档可以另外保存有界的小预览用于还原用户消息 UI，但预览不会重新进入模型历史。启动请求在发送前按实际 `Parcel` 大小校验，超过 768 KiB 时会明确拒绝并提示减少图片数量或分辨率。运行归档 transcript 上限为 100 万字符；会话上下文检查点和直接 IPC transcript 上限为 9.6 万字符；outbox 批量 drain 使用更紧的单项预算，确保最坏 8 条待交付结果仍处于 Binder 事务预算内。任何容量压缩都会在保留的 history 前插入明确的 Eta system notice，不会把删头后的 transcript 冒充成完整上下文。会话元数据、逐条展示消息和有界上下文检查点分别存储；会话列表查询不读取上下文正文，启动时也不会因单个长期会话阻塞全部会话恢复。
 
 浮层在已完成结果后发起的 continuation 会在 handoff 中只携带本次新增的 prompt supplement，不累计复制旧补充。App 回到前台时 drain outbox，把该用户消息和增量 transcript 一起写回 history。
 
-上下文自动压缩和跨 run、跨 Provider 的 opaque reasoning 状态尚未实现；Responses output Items 只在当前 run 内回放，不能作为持久会话状态。
+跨 run 的上下文自动压缩由 `AgentContextCompactor` 在每次运行发起前执行：按 Provider 配置的 `contextWindow`（缺省 128 000 tokens）以 4 字符/token 估算预算，估算占用达到 70% 时触发，目标压回 50%。裁剪以完整 `user` 回合为单位进行，不会留下孤立的 tool 结果；被丢弃的回合先交给同一个 Provider、`tools` 为空的摘要请求，摘要失败时回退到本地确定性摘录，因此压缩本身不会执行任何工具。摘要作为带 `<eta_context_summary>` 标记的 `system` 消息置于保留回合之前；历史正文里的摘要标签、图片 data URL 和 opaque 字段都会先清洗，不能突破摘要边界或伪装成指令。压缩结果通过 `historyReplacement` 随最终结果一起跨 IPC、outbox、归档与 App 持久化，续跑和结果恢复都优先使用它，而不是重新拼接旧 history。替换内容只在解码成功时生效：损坏的检查点会被丢弃并保留原有 history，合法的 `[]` 才会被当成完整清空。
+
+单次 run 内的长工具链由同一个类的 `degradeStaleToolResults` 兜底：每回合结束、下一次请求前复查预算，超过 70% 时把较早的 `tool` 结果正文截断到 4 000 字符并追加明确的截断说明，最近 2 个回合完整保留。它只改 `content`，不删除消息、不改 `tool_call_id`、不重写非字符串的多模态 tool 正文，因此 assistant/tool 配对和同一回合的重试一致性都不受影响，也不需要额外的摘要请求。被截断的正文会随之进入本轮增量 transcript：持久化的历史与模型实际看到的上下文保持同一份内容。跨 run、跨 Provider 的 opaque reasoning 状态尚未实现，Responses output Items 只在当前 run 内回放，不能作为持久会话状态。
 
 ## Skills 安装边界
 

@@ -112,6 +112,48 @@ class AgentPendingResultRecoveryTest {
     }
 
     @Test
+    fun recoveryUsesHistoryReplacementAndDoesNotPersistPromptSupplementTwice() {
+        val replacement = listOf(
+            AgentModelClient.ConversationMessage(role = "system", content = "压缩后的摘要"),
+            AgentModelClient.ConversationMessage(role = "user", content = "保留的问题"),
+        )
+        val transcript = listOf(
+            AgentModelClient.ConversationMessage(role = "assistant", content = "压缩后回答"),
+        )
+        val promptSupplement = AgentUiHandoffPayload.Supplement(
+            index = 1,
+            text = "继续检查",
+            createdAt = 2L,
+        )
+        val recovered = AgentPendingResultRecovery.apply(
+            state = AgentChatUiState(
+                messages = emptyList(),
+                history = listOf(
+                    AgentModelClient.ConversationMessage(role = "user", content = "旧历史"),
+                ),
+                input = "",
+                isStreaming = false,
+                thinkingEnabled = false,
+            ),
+            runId = "run-compacted",
+            result = AgentRuntimeWire.RunResult(
+                runId = "run-compacted",
+                ok = true,
+                content = "压缩后回答",
+                transcript = transcript,
+                historyReplacement = replacement,
+            ),
+            promptSupplement = promptSupplement,
+            supplements = emptyList(),
+        )
+
+        assertEquals(replacement + transcript, recovered.state.history)
+        assertTrue(recovered.state.history.none { it.content == "旧历史" })
+        assertTrue(recovered.state.history.none { it.content == promptSupplement.text })
+        assertEquals("user-run-compacted-supplement-1", recovered.state.messages.first().id)
+    }
+
+    @Test
     fun recoveryCreatesAssistantWhenStreamingPlaceholderWasNeverPersisted() {
         val state = AgentChatUiState(
             messages = emptyList(),

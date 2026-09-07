@@ -215,6 +215,7 @@ internal class AgentRuntimeRunExecutor(
                 content = completedResponse.content,
                 reasoningContent = completedResponse.reasoningContent,
                 transcript = completedResponse.transcript,
+                historyReplacement = completedResponse.historyReplacement,
             )
         } catch (throwable: Throwable) {
             cancelled = runController.isCancelled || throwable is AgentRunCancelledException
@@ -257,6 +258,7 @@ internal class AgentRuntimeRunExecutor(
                 error = message,
                 reasoningContent = modelFailure?.reasoningContent.orEmpty(),
                 transcript = modelFailure?.transcript.orEmpty(),
+                historyReplacement = modelFailure?.historyReplacement,
             )
         } finally {
             runCatching { toolsBinding?.close() }

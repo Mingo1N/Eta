@@ -73,6 +73,56 @@ class AgentContinuationBuilderTest {
         assertTrue(payload.supplements.isEmpty())
     }
 
+    @Test
+    fun continuationUsesHistoryReplacementBeforeTranscriptAndNewSupplementPrompt() {
+        val request = AgentRuntimeWire.RunRequest(
+            runId = "run-old",
+            prompt = "原始问题",
+            config = modelConfig(),
+            history = listOf(
+                AgentModelClient.ConversationMessage(role = "user", content = "未压缩旧历史"),
+            ),
+            handoff = AgentRuntimeWire.EntryHandoff(
+                id = "run-old",
+                source = "agent_ui",
+                payload = AgentUiHandoffPayload(conversationId = "conversation-1").toJson(),
+            ),
+        )
+        val replacement = listOf(
+            AgentModelClient.ConversationMessage(role = "system", content = "压缩后的摘要"),
+            AgentModelClient.ConversationMessage(role = "user", content = "保留的最新问题"),
+        )
+        val transcript = listOf(
+            AgentModelClient.ConversationMessage(role = "assistant", content = "压缩前的最终回答"),
+        )
+        val response = AgentModelClient.ModelResponse.Text(
+            content = "压缩前的最终回答",
+            transcript = transcript,
+            historyReplacement = replacement,
+        )
+
+        val continuation = AgentContinuationBuilder.build(
+            request = request,
+            response = response,
+            supplement = "继续验证压缩后的上下文",
+            newRunId = "run-next",
+            createdAt = 456L,
+        )
+
+        assertEquals(replacement + transcript, continuation.history)
+        assertTrue(continuation.history.none { it.content == "未压缩旧历史" })
+        assertEquals("继续验证压缩后的上下文", continuation.prompt)
+        val payload = AgentUiHandoffPayload.from(continuation.handoff?.payload.orEmpty())
+        assertEquals(
+            AgentUiHandoffPayload.Supplement(
+                index = 1,
+                text = "继续验证压缩后的上下文",
+                createdAt = 456L,
+            ),
+            payload.promptSupplement,
+        )
+    }
+
     private fun modelConfig(): AgentModelClient.ModelConfig =
         AgentModelClient.ModelConfig(
             baseUrl = "https://example.invalid/v1",

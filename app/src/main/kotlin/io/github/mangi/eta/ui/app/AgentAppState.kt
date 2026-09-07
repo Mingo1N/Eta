@@ -1931,7 +1931,11 @@ internal class AgentAppState(
             currentRunJob = null
         }
         updateRunTrace(runId) { messages -> runMessageProjector.finalizeRun(runId, messages) }
-        applyConversationHistoryResult(runId, result.transcript)
+        applyConversationHistoryResult(
+            runId = runId,
+            additions = result.transcript,
+            historyReplacement = result.historyReplacement,
+        )
         when {
             result.ok && result.content.isNotBlank() -> completeLatestAssistantMessage(
                 runId,
@@ -2105,10 +2109,16 @@ internal class AgentAppState(
     private fun applyConversationHistoryResult(
         runId: String,
         additions: List<AgentModelClient.ConversationMessage>,
+        historyReplacement: List<AgentModelClient.ConversationMessage>? = null,
     ) {
         val conversationId = conversationIdForRun(runId) ?: return
         val state = conversationsById[conversationId] ?: return
-        val outcome = AgentRuntimeHistoryReducer.apply(state, runId, additions)
+        val outcome = AgentRuntimeHistoryReducer.apply(
+            state = state,
+            runId = runId,
+            additions = additions,
+            historyReplacement = historyReplacement,
+        )
         if (!outcome.alreadyApplied) updateConversation(conversationId, outcome.state)
     }
 

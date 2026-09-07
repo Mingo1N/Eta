@@ -10,6 +10,7 @@ import org.json.JSONTokener
 internal object AgentConversationCodec {
     internal const val MAX_IPC_TRANSCRIPT_CHARS = 96_000
     internal const val MAX_DRAIN_TRANSCRIPT_CHARS = 16_000
+    internal const val MAX_DRAIN_CHECKPOINT_CHARS = 8_000
     internal const val MAX_STORAGE_TRANSCRIPT_CHARS = 1_000_000
     internal const val MAX_CONVERSATION_CHECKPOINT_CHARS = 96_000
 
@@ -40,19 +41,30 @@ internal object AgentConversationCodec {
     fun encodeConversationCheckpoint(messages: List<AgentModelClient.ConversationMessage>): String =
         encodeBounded(messages, MAX_CONVERSATION_CHECKPOINT_CHARS)
 
+    fun encodeConversationCheckpointForDrain(
+        messages: List<AgentModelClient.ConversationMessage>,
+    ): String = encodeBounded(messages, MAX_DRAIN_CHECKPOINT_CHARS)
+
     fun messagesForIpc(
         messages: List<AgentModelClient.ConversationMessage>,
     ): List<AgentModelClient.ConversationMessage> =
         decodeTranscript(encodeTranscriptForIpc(messages))
 
     fun decodeTranscript(raw: String?): List<AgentModelClient.ConversationMessage> =
-        if (raw.isNullOrBlank()) {
-            emptyList()
-        } else {
-            runCatching {
-                json.decodeFromString<List<AgentModelClient.ConversationMessage>>(raw)
-            }.getOrDefault(emptyList())
-        }
+        decodeTranscriptOrKeep(raw) ?: emptyList()
+
+    /**
+     * 与会话替换语义绑定的解码：解析失败必须与「合法空 history」区分开，
+     * 返回 null 表示调用方应保留原有历史，而不是把损坏数据当成空历史。
+     */
+    fun decodeTranscriptOrKeep(raw: String?): List<AgentModelClient.ConversationMessage>? {
+        if (raw.isNullOrBlank()) return null
+        val trimmed = raw.trim()
+        if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return null
+        return runCatching {
+            json.decodeFromString<List<AgentModelClient.ConversationMessage>>(trimmed)
+        }.getOrNull()
+    }
 
     fun toJsonObject(message: AgentModelClient.ConversationMessage): JSONObject =
         JSONObject()

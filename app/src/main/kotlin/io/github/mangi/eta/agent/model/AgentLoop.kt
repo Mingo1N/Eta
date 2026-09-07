@@ -52,6 +52,12 @@ internal class AgentLoop(
             appendPendingSteeringMessage()
 
             val roundTools = toolsForRound?.invoke() ?: tools
+            // 先按预算降级较早的工具结果：不删消息、不额外请求，assistant/tool 配对保持不变。
+            AgentContextCompactor.degradeStaleToolResults(
+                config = config,
+                messages = messages,
+                tools = roundTools,
+            )
             toolCallValidator = AgentToolCallValidator(roundTools)
             val reasoningLengthBeforeRound = accumulatedReasoning.length
             val completedRound = try {
