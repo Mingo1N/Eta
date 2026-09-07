@@ -79,8 +79,26 @@ jobs:
           pattern = re.compile(
               r"^e: |^\* What went wrong|> Task .+ FAILED|^Caused by:|\w+Test > .+ (FAILED|SKIPPED)|\berror:",
           )
-          hits = [line for line in lines if pattern.search(line)][:12] or lines[-12:]
+          hits = [line for line in lines if pattern.search(line)][:8] or lines[-8:]
           for line in hits:
-              text = line.replace("%", "%25")[:700]
-              print(f"::error::{text}")
+              print("::error::" + line.replace("%", "%25")[:700])
+
+          # Gradle 的控制台输出不含断言的 expected/actual，断言文本只在 JUnit XML 里。
+          import glob
+          import xml.etree.ElementTree as ET
+
+          shown = 0
+          for report in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):
+              try:
+                  root = ET.parse(report).getroot()
+              except Exception:
+                  continue
+              for case in root.iter("testcase"):
+                  for failure in case.findall("failure"):
+                      message = " ".join((failure.get("message") or failure.text or "").split())
+                      text = "%s :: %s" % (case.get("name"), message)
+                      print("::error::" + text.replace("%", "%25")[:700])
+                      shown += 1
+                      if shown >= 6:
+                          raise SystemExit(0)
           PY

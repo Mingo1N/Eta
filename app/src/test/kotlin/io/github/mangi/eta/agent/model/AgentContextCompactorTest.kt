@@ -64,13 +64,16 @@ class AgentContextCompactorTest {
     @Test
     fun compactionKeepsNewestCompleteRoundsInOrderAndStartsWithSystemSummary() {
         val provider = RecordingProvider(response = response("模型摘要"))
+        // 预算算术：三个回合序列化后 ≈ 20.4k 字符；窗口 6800 → 字符预算 27.2k，
+        // 触发线 19.04k（会压缩），目标 13.6k → historyBudget ≈ 13.5k 正好容纳
+        // middle+new（≈12.2k）而装不下 old，因此期望保留的是后两个回合。
         val history = listOf(
-            message("user", "old-user-" + "o".repeat(1_150)),
-            message("assistant", "old-assistant-" + "o".repeat(1_150)),
-            message("user", "middle-user-" + "m".repeat(1_150)),
-            message("assistant", "middle-assistant-" + "m".repeat(1_150)),
-            message("user", "new-user-" + "n".repeat(700)),
-            message("assistant", "new-assistant-" + "n".repeat(700)),
+            message("user", "old-user-" + "o".repeat(4_000)),
+            message("assistant", "old-assistant-" + "o".repeat(4_000)),
+            message("user", "middle-user-" + "m".repeat(4_000)),
+            message("assistant", "middle-assistant-" + "m".repeat(4_000)),
+            message("user", "new-user-" + "n".repeat(2_000)),
+            message("assistant", "new-assistant-" + "n".repeat(2_000)),
             message("tool", "new-tool-result", toolCallId = "call-new"),
         )
         val systemMessages = JSONArray().put(
@@ -78,7 +81,7 @@ class AgentContextCompactorTest {
         )
 
         val result = compact(
-            config = config(contextWindow = 2_500),
+            config = config(contextWindow = 6_800),
             history = history,
             systemMessages = systemMessages,
             provider = provider,
@@ -200,6 +203,9 @@ class AgentContextCompactorTest {
     @Test
     fun summaryInputOmitsImagesAndResponsesOpaqueFields() {
         val image = "data:image/png;base64,SECRET_BASE64_PAYLOAD"
+        // 历史必须超过 1000 token 窗口的触发线（4000 字符 × 70%）才会进入压缩，
+        // 因此这里给 assistant 正文补足长度，否则 compactIfNeeded 直接原样返回。
+        val filler = "p".repeat(3_000)
         val content = JSONObject()
             .put("type", "message")
             .put("text", "safe text")
@@ -224,7 +230,7 @@ class AgentContextCompactorTest {
                 ),
                 message(
                     role = "assistant",
-                    content = "普通回答",
+                    content = "普通回答-" + filler,
                     toolCallsJson = toolCalls("call-safe", arguments = "OPAQUE_ARGUMENT"),
                 ),
             ),
