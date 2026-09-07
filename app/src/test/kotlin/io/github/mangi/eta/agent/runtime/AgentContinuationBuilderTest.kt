@@ -79,6 +79,7 @@ class AgentContinuationBuilderTest {
             runId = "run-old",
             prompt = "原始问题",
             config = modelConfig(),
+            images = emptyList(),
             history = listOf(
                 AgentModelClient.ConversationMessage(role = "user", content = "未压缩旧历史"),
             ),

@@ -776,7 +776,7 @@ class AgentModelClientLoopTest {
             },
         )
         assertEquals(
-            listOf("assistant", "tool").repeat(toolRounds) + listOf("assistant"),
+            (0 until toolRounds).flatMap { listOf("assistant", "tool") } + listOf("assistant"),
             result.transcript.map { it.role },
         )
         assertTrue(result.transcript.any { it.role == "tool" && it.content.contains("重新调用该工具") })
