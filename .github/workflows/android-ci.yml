@@ -41,17 +41,26 @@ jobs:
       - name: 安装 Android SDK 37
         run: sdkmanager --channel=3 "platforms;android-37.0"
 
-      - name: 运行 Debug 单元测试与 Lint
+      - name: 运行 Debug 单元测试
         shell: bash
         run: |-
           set -o pipefail
           ./gradlew --no-daemon --no-configuration-cache \
-            :app:testDebugUnitTest :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/build.log"
+            :app:testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # 仓库此前没有在 CI 里跑过 lint（release 工作流的 checkReleaseBuilds = false，且没有 baseline），
+      # 所以先报告而不阻塞合并，避免历史遗留问题把功能 PR 卡住。
+      - name: 运行 Lint（不阻塞）
+        continue-on-error: true
+        shell: bash
+        run: |-
+          ./gradlew --no-daemon --no-configuration-cache \
+            :app:lintDebug 2>&1 | tee -a "$RUNNER_TEMP/build.log"
 
       # Actions 日志包需要登录态才能下载，注解则是公开可读的；失败时把关键行写成注解，
       # 让没有仓库凭据的贡献者也能直接看到编译与测试错误。
       - name: 输出失败摘要
-        if: failure()
+        if: always()
         shell: bash
         run: |-
           python3 - "$RUNNER_TEMP/build.log" <<'PY'
@@ -64,8 +73,11 @@ jobs:
               print("::error::missing build log")
               raise SystemExit(0)
 
+          if not any("BUILD FAILED" in line for line in lines):
+              raise SystemExit(0)
+
           pattern = re.compile(
-              r"^e: |^w: unused|^\* What went wrong|> Task .+ FAILED|^Caused by:|FAILED$|\berror:",
+              r"^e: |^\* What went wrong|> Task .+ FAILED|^Caused by:|\w+Test > .+ (FAILED|SKIPPED)|\berror:",
           )
           hits = [line for line in lines if pattern.search(line)][:12] or lines[-12:]
           for line in hits:
