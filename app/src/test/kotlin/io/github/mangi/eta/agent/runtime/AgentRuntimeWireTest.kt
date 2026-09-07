@@ -231,7 +231,7 @@ class AgentRuntimeWireTest {
             ?.single()
             ?.getBundle("result")
             ?: error("drain response missing result bundle")
-        val encoded = resultBundle.getString("history_replacement_json")
+        val encoded = requireNotNull(resultBundle.getString("history_replacement_json"))
 
         assertTrue(encoded.length <= AgentConversationCodec.MAX_DRAIN_CHECKPOINT_CHARS)
         val restored = AgentRuntimeWire.completedRunsFromBundle(drained).single().result
