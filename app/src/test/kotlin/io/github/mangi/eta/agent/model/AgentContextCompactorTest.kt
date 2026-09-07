@@ -386,6 +386,28 @@ class AgentContextCompactorTest {
         assertEquals(20_000, messages.getJSONObject(5).getString("content").length)
     }
 
+    @Test
+    fun staleToolResultCapScalesWithWindow() {
+        val small = turnMessages(4, 20_000)
+        AgentContextCompactor.degradeStaleToolResults(
+            config = config(contextWindow = 2_000),
+            messages = small,
+            tools = JSONArray(),
+        )
+        // 窗口 2000 → 目标 4000 字符 → 比例上限 400，由下限 800 托住，避免留下不可用片段。
+        assertTrue(small.getJSONObject(1).getString("content").length < 1_000)
+
+        val large = turnMessages(8, 20_000)
+        AgentContextCompactor.degradeStaleToolResults(
+            config = config(contextWindow = 40_000),
+            messages = large,
+            tools = JSONArray(),
+        )
+        // 窗口 40000 → 目标 80000 字符 → 比例值 8000 恰好撞封顶，不会无限放宽。
+        val kept = large.getJSONObject(1).getString("content")
+        assertTrue("实际保留 ${kept.length} 字符", kept.length in 8_000..9_000)
+    }
+
     private fun turnMessages(turns: Int, resultChars: Int, contextMarker: String = "turn"): JSONArray =
         JSONArray().apply {
             repeat(turns) { index ->

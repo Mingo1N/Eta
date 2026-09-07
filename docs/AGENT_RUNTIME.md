@@ -148,7 +148,7 @@ historyReplacement
 
 跨 run 的上下文自动压缩由 `AgentContextCompactor` 在每次运行发起前执行：按 Provider 配置的 `contextWindow`（缺省 128 000 tokens）以 4 字符/token 估算预算，估算占用达到 70% 时触发，目标压回 50%。裁剪以完整 `user` 回合为单位进行，不会留下孤立的 tool 结果；被丢弃的回合先交给同一个 Provider、`tools` 为空的摘要请求，摘要失败时回退到本地确定性摘录，因此压缩本身不会执行任何工具。摘要作为带 `<eta_context_summary>` 标记的 `system` 消息置于保留回合之前；历史正文里的摘要标签、图片 data URL 和 opaque 字段都会先清洗，不能突破摘要边界或伪装成指令。压缩结果通过 `historyReplacement` 随最终结果一起跨 IPC、outbox、归档与 App 持久化，续跑和结果恢复都优先使用它，而不是重新拼接旧 history。替换内容只在解码成功时生效：损坏的检查点会被丢弃并保留原有 history，合法的 `[]` 才会被当成完整清空。
 
-单次 run 内的长工具链由同一个类的 `degradeStaleToolResults` 兜底：每回合结束、下一次请求前复查预算，超过 70% 时把较早的 `tool` 结果正文截断到 4 000 字符并追加明确的截断说明，最近 2 个回合完整保留。它只改 `content`，不删除消息、不改 `tool_call_id`、不重写非字符串的多模态 tool 正文，因此 assistant/tool 配对和同一回合的重试一致性都不受影响，也不需要额外的摘要请求。被截断的正文会随之进入本轮增量 transcript：持久化的历史与模型实际看到的上下文保持同一份内容。跨 run、跨 Provider 的 opaque reasoning 状态尚未实现，Responses output Items 只在当前 run 内回放，不能作为持久会话状态。
+单次 run 内的长工具链由同一个类的 `degradeStaleToolResults` 兜底：每回合结束、下一次请求前复查预算，超过 70% 时截断较早的 `tool` 结果正文并追加明确的截断说明，最近 2 个回合完整保留。单条保留长度不是固定值，而是按窗口缩放——取目标预算的十分之一，夹在 800 与 8 000 字符之间：固定上限在小窗口模型上会让降级自己到不了目标线，在大窗口模型上又过于激进。它只改 `content`，不删除消息、不改 `tool_call_id`、不重写非字符串的多模态 tool 正文，因此 assistant/tool 配对和同一回合的重试一致性都不受影响，也不需要额外的摘要请求。被截断的正文会随之进入本轮增量 transcript：持久化的历史与模型实际看到的上下文保持同一份内容。跨 run、跨 Provider 的 opaque reasoning 状态尚未实现，Responses output Items 只在当前 run 内回放，不能作为持久会话状态。
 
 ## Skills 安装边界
 

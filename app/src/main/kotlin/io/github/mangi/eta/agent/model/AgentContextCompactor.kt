@@ -106,6 +106,10 @@ internal object AgentContextCompactor {
         if (projected < budgetChars(contextWindow, TRIGGER_RATIO)) return 0
 
         val targetChars = budgetChars(contextWindow, TARGET_RATIO)
+        // 每条 stale 结果的上限随窗口缩放：固定 4000 字符在小窗口模型上会让降级自己就到不了目标线，
+        // 在大窗口模型上又过于激进。上下限保证降级永远留下可用的片段。
+        val keptCap = (targetChars / STALE_TOOL_RESULT_BUDGET_DIVISOR).toInt()
+            .coerceIn(MIN_KEPT_TOOL_RESULT_CHARS, MAX_KEPT_TOOL_RESULT_CHARS)
         val assistantIndexes = (0 until messages.length())
             .filter { index -> messages.optJSONObject(index)?.optString("role") == ROLE_ASSISTANT }
         val protectedFrom = assistantIndexes.drop(KEEP_RECENT_TURNS).firstOrNull() ?: return 0
@@ -116,8 +120,8 @@ internal object AgentContextCompactor {
             val message = messages.optJSONObject(index) ?: continue
             if (message.optString("role") != ROLE_TOOL) continue
             val content = message.opt("content") as? String ?: continue
-            if (content.length <= MAX_KEPT_TOOL_RESULT_CHARS) continue
-            val replacement = content.take(MAX_KEPT_TOOL_RESULT_CHARS) + TOOL_RESULT_STALE_NOTICE
+            if (content.length <= keptCap) continue
+            val replacement = content.take(keptCap) + TOOL_RESULT_STALE_NOTICE
             message.put("content", replacement)
             projected -= content.length - replacement.length
             degraded += 1
@@ -534,7 +538,9 @@ internal object AgentContextCompactor {
     private const val MAX_SUMMARY_CHARS = 8_000
     private const val MAX_TRANSCRIPT_CHARS = 48_000
     private const val MAX_TOOL_RESULT_CHARS = 4_000
-    private const val MAX_KEPT_TOOL_RESULT_CHARS = 4_000
+    private const val MIN_KEPT_TOOL_RESULT_CHARS = 800
+    private const val MAX_KEPT_TOOL_RESULT_CHARS = 8_000
+    private const val STALE_TOOL_RESULT_BUDGET_DIVISOR = 10L
     private const val KEEP_RECENT_TURNS = 2
     private const val MAX_CONTENT_SUMMARY_CHARS = 5_000
     private const val MAX_REASONING_SUMMARY_CHARS = 1_000
