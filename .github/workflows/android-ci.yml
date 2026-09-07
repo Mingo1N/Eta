@@ -46,59 +46,68 @@ jobs:
         run: |-
           set -o pipefail
           ./gradlew --no-daemon --no-configuration-cache \
-            :app:testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/build.log"
+            :app:testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/test.log"
 
       # 仓库此前没有在 CI 里跑过 lint（release 工作流的 checkReleaseBuilds = false，且没有 baseline），
-      # 所以先报告而不阻塞合并，避免历史遗留问题把功能 PR 卡住。
+      # 现存问题（例如日期编号法让 versionCode 逼近 Play 上限）会直接判定失败，
+      # 因此这里只报告不阻塞，避免历史遗留问题卡住功能 PR。
       - name: 运行 Lint（不阻塞）
         continue-on-error: true
         shell: bash
         run: |-
           ./gradlew --no-daemon --no-configuration-cache \
-            :app:lintDebug 2>&1 | tee -a "$RUNNER_TEMP/build.log"
+            :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/lint.log"
 
-      # Actions 日志包需要登录态才能下载，注解则是公开可读的；失败时把关键行写成注解，
-      # 让没有仓库凭据的贡献者也能直接看到编译与测试错误。
-      - name: 输出失败摘要
+      # Actions 日志包需要登录态才能下载，注解则是公开可读的。失败时把关键行写成注解，
+      # 让没有仓库凭据的贡献者也能直接看到编译与测试错误；Gradle 控制台不含断言的
+      # expected/actual，因此断言文本从 JUnit XML 里取。
+      - name: 输出结果摘要
         if: always()
         shell: bash
         run: |-
-          python3 - "$RUNNER_TEMP/build.log" <<'PY'
+          python3 - "$RUNNER_TEMP/test.log" "$RUNNER_TEMP/lint.log" <<'PY'
+          import glob
           import re
           import sys
-
-          try:
-              lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
-          except OSError:
-              print("::error::missing build log")
-              raise SystemExit(0)
-
-          if not any("BUILD FAILED" in line for line in lines):
-              raise SystemExit(0)
-
-          pattern = re.compile(
-              r"^e: |^\* What went wrong|> Task .+ FAILED|^Caused by:|\w+Test > .+ (FAILED|SKIPPED)|\berror:",
-          )
-          hits = [line for line in lines if pattern.search(line)][:8] or lines[-8:]
-          for line in hits:
-              print("::error::" + line.replace("%", "%25")[:700])
-
-          # Gradle 的控制台输出不含断言的 expected/actual，断言文本只在 JUnit XML 里。
-          import glob
           import xml.etree.ElementTree as ET
 
-          shown = 0
-          for report in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):
+          test_log, lint_log = sys.argv[1], sys.argv[2]
+          pattern = re.compile(
+              r"^e: |^\* What went wrong|> Task .+ FAILED|^Caused by:|\w+Test > .+ FAILED",
+          )
+
+
+          def read(path):
               try:
-                  root = ET.parse(report).getroot()
-              except Exception:
+                  return open(path, encoding="utf-8", errors="replace").read().splitlines()
+              except OSError:
+                  return []
+
+
+          def emit(level, text):
+              print("::%s::%s" % (level, text.replace("%", "%25")[:700]))
+
+
+          for path, level in ((test_log, "error"), (lint_log, "warning")):
+              lines = read(path)
+              if not any("BUILD FAILED" in line for line in lines):
                   continue
-              for case in root.iter("testcase"):
-                  for failure in case.findall("failure"):
-                      message = " ".join((failure.get("message") or failure.text or "").split())
-                      text = "%s :: %s" % (case.get("name"), message)
-                      print("::error::" + text.replace("%", "%25")[:700])
-                      shown += 1
-                      if shown >= 6:
-                          raise SystemExit(0)
+              hits = [line for line in lines if pattern.search(line)][:6]
+              for line in hits or lines[-4:]:
+                  emit(level, line)
+
+          if any("BUILD FAILED" in line for line in read(test_log)):
+              shown = 0
+              for report in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):
+                  try:
+                      root = ET.parse(report).getroot()
+                  except Exception:
+                      continue
+                  for case in root.iter("testcase"):
+                      for failure in case.findall("failure"):
+                          message = " ".join((failure.get("message") or failure.text or "").split())
+                          emit("error", "%s :: %s" % (case.get("name"), message))
+                          shown += 1
+                          if shown >= 6:
+                              raise SystemExit(0)
           PY
