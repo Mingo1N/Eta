@@ -51,16 +51,13 @@ jobs:
       # 仓库此前没有在 CI 里跑过 lint（release 工作流的 checkReleaseBuilds = false，且没有 baseline），
       # 现存问题（例如日期编号法让 versionCode 逼近 Play 上限）会直接判定失败，
       # 因此这里只报告不阻塞，避免历史遗留问题卡住功能 PR。
-      # GITHUB_ACTIONS 置空是为了关掉 Gradle/AGP 自己的 ::error:: 注解：它们在非阻塞步骤里
-      # 仍会把历史遗留问题写成 failure 注解，混进真正需要关注的错误里。
+      # 用 `|| true` 收掉退出码：否则即便步骤不阻塞，runner 仍会写一条 failure 注解。
+      # AGP 自己为 versionCode 告警写出的 ::error:: 注解无法从这里关掉，会保留为已知噪音。
       - name: 运行 Lint（不阻塞）
-        continue-on-error: true
-        env:
-          GITHUB_ACTIONS: ""
         shell: bash
         run: |-
           ./gradlew --no-daemon --no-configuration-cache \
-            :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/lint.log"
+            :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/lint.log" || true
 
       # Actions 日志包需要登录态才能下载，注解则是公开可读的。失败时把关键行写成注解，
       # 让没有仓库凭据的贡献者也能直接看到编译与测试错误；Gradle 控制台不含断言的
