@@ -6,10 +6,18 @@ name: Eta Debug APK
 # 而 fork 不会继承上游的 Secrets，所以那条工作流在 fork 上必然在
 # “还原发布证书”一步 exit 1，连 assemble 都到不了，因此看不到任何 artifact。
 # 这个工作流刻意只跑 :app:assembleDebug（debug 用的是 AGP 自动生成的调试证书），
-# 不依赖任何 Secrets，只在手动触发时跑，不干扰上面的 CI 与 release 流程。
+# 不依赖任何 Secrets，不干扰上面的 CI 与 release 流程。
 
 on:
   workflow_dispatch:
+  # GitHub 只在工作流首次运行后才注册它（未运行的文件按 path 查询是 404，
+  # fork 上连上游自带的 android-release.yml 也一样 404），所以“只能手动触发”
+  # 会死锁：注册不上就没有 Run workflow 按钮。这里额外允许在 ci/debug-apk
+  # 这一条自用分支上 push 自触发，跑完第一次即可注册，之后可随意手动重跑。
+  # 功能分支 feat/context-compaction 不会命中这个匹配，不受影响。
+  push:
+    branches:
+      - ci/debug-apk
 
 permissions:
   contents: read
